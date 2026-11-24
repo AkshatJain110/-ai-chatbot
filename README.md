@@ -29,7 +29,7 @@ cp .env.example .env
 Edit `.env` to supply your Gemini API keys:
 ```env
 LLM_API_KEYS=your_first_gemini_key,your_second_gemini_key
-LLM_MODEL=gemini/gemini-3.5-flash
+LLM_MODEL=gemini/gemini-3.5-flash-lite
 LLM_TIMEOUT_SECONDS=60
 DEFAULT_SYSTEM_PROMPT=You are a helpful and concise AI assistant.
 ENABLE_FAILURE_SIMULATION=true
@@ -107,6 +107,10 @@ The frontend Vite development server runs on `http://localhost:3000` and communi
 - **System Prompt Statefulness**: An initial `system_prompt` provided on turn 1 is persisted on the session row and automatically prepended to LLM context on all subsequent turns without requiring the client to retransmit it.
 - **Session Isolation**: Messages are strictly scoped by `session_id`. Querying unknown sessions returns HTTP 404 `{"detail": "session not found"}`.
 
+### Model Selection & Swappability
+- **Swappable via `LLM_MODEL`**: The underlying LLM is fully swappable via the `LLM_MODEL` environment variable (e.g. `gemini/gemini-3.5-flash-lite`, `gemini/gemini-3.5-flash`, etc.) without modifying any application code.
+- **Low-Latency Default (`gemini-3.5-flash-lite`)**: Full `gemini-3.5-flash` features internal reasoning / "thinking" tokens that routinely inflated conversational reply latency to 10–40 seconds. Selecting `gemini/gemini-3.5-flash-lite` as the default offers drastically lower latency for interactive chat while preserving high generation quality.
+
 ---
 
 ## 4. Verification: how to see failover, cache hits and per-message token usage (include curl commands with X-Simulate-Failure)
@@ -172,7 +176,7 @@ Observe `input_tokens: ~40`. The input tokens include previous context turns, de
 ## 5. Setup Used: your editor and AI tools (Antigravity, Gemini)
 
 - **AI Pair Programmer**: Antigravity with Google DeepMind agentic coding architecture.
-- **Foundation LLM**: Google Gemini 3.5 Flash (`gemini/gemini-3.5-flash`) via LiteLLM for inference, conversational reasoning, and testing.
+- **Foundation LLM**: Google Gemini 3.5 Flash Lite (`gemini/gemini-3.5-flash-lite`) via LiteLLM for inference, conversational reasoning, and testing.
 - **Development Tooling**:
   - Python 3.12/3.13, FastAPI, Uvicorn, SQLite3 (WAL mode)
   - Pytest + Pytest-Asyncio for automated test suites

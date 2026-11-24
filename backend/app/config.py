@@ -59,7 +59,7 @@ class Settings:
 
     @property
     def llm_model(self) -> str:
-        return os.getenv("LLM_MODEL", "gemini/gemini-3.5-flash")
+        return os.getenv("LLM_MODEL", "gemini/gemini-3.5-flash-lite")
 
     @property
     def llm_timeout_seconds(self) -> int:
