@@ -75,10 +75,10 @@ ai-chatbot/
 3. Token usage:
    Tokens show directly underneath each assistant reply in the UI (Input tokens and Output tokens) and in the API response metadata. Multi-turn chats show input tokens increasing as conversation history is sent.
 
-## 5. Setup Used: your editor and AI tools
+## 5. Setup Used: 
 I built this on macOS using VS Code as my primary editor. I used Antigravity as my AI pair programmer to assist with design and implementation, Google Gemini (via LiteLLM) for LLM completions, and Docker Desktop for containerization.
 
-## 6. Bonus features (if any)
+## 6. Bonus features 
 - Light and dark theme toggle remembering preferences in localStorage.
 - Animated typing indicator while waiting for replies.
 - New chat button that generates a fresh random session ID.
