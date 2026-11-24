@@ -1,11 +1,7 @@
-# Stage 1: Build stage
+# Stage 1: Build virtual environment
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -14,27 +10,20 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Stage 2: Runtime stage
+# Stage 2: Runtime
 FROM python:3.12-slim AS runner
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 
-# Create non-root user and /data directory
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /data && \
     chown -R appuser:appuser /data /app
 
-# Copy backend application code
 COPY --chown=appuser:appuser backend /app/backend
 
 USER appuser
