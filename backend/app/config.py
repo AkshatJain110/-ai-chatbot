@@ -59,7 +59,7 @@ class Settings:
 
     @property
     def llm_model(self) -> str:
-        return os.getenv("LLM_MODEL", "gemini/gemini-2.0-flash")
+        return os.getenv("LLM_MODEL", "gemini/gemini-3.5-flash")
 
     @property
     def default_system_prompt(self) -> str:
