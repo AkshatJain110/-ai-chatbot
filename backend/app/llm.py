@@ -15,6 +15,9 @@ from litellm.exceptions import (
     APIConnectionError,
     Timeout,
     APIError,
+    AuthenticationError,
+    PermissionDeniedError,
+    BadRequestError,
 )
 
 from .config import settings
@@ -46,6 +49,8 @@ def parse_simulate_failure_header(header_value: Optional[str]) -> Dict[str, int]
     return mapping
 
 
+import httpx
+
 def raise_simulated_exception(status_code: int, model: str) -> None:
     """
     Raises the equivalent LiteLLM exception for simulated statuses
@@ -54,7 +59,12 @@ def raise_simulated_exception(status_code: int, model: str) -> None:
     msg = f"Simulated provider failure with HTTP {status_code}"
     provider = "gemini"
 
-    if status_code == 429:
+    if status_code == 401:
+        raise AuthenticationError(message=msg, llm_provider=provider, model=model)
+    elif status_code == 403:
+        dummy_resp = httpx.Response(status_code=403, request=httpx.Request("POST", "https://generativelanguage.googleapis.com"))
+        raise PermissionDeniedError(message=msg, llm_provider=provider, model=model, response=dummy_resp)
+    elif status_code == 429:
         raise RateLimitError(message=msg, llm_provider=provider, model=model)
     elif status_code == 500:
         raise InternalServerError(message=msg, llm_provider=provider, model=model)
@@ -70,19 +80,33 @@ def raise_simulated_exception(status_code: int, model: str) -> None:
 def is_retryable_error(exc: Exception) -> bool:
     """
     Determines if an error warrants failing over to the next key.
-    On 429, quota errors, or any 5xx (and timeouts/connection errors), move to the next key.
-    Do not fail over on 4xx client errors (e.g. 400 invalid request) unless 429/quota.
+    Fails over on:
+    - 429, quota errors, resource exhaustion
+    - 5xx errors, timeouts, connection errors
+    - 401, 403 (authentication/permission errors)
+    - 400 where the error message indicates the API key is invalid or expired
+    Does NOT fail over on other 4xx client errors (e.g. general 400 bad request).
     """
-    if isinstance(exc, (RateLimitError, InternalServerError, ServiceUnavailableError, APIConnectionError, Timeout)):
+    if isinstance(exc, (RateLimitError, InternalServerError, ServiceUnavailableError, APIConnectionError, Timeout, AuthenticationError, PermissionDeniedError)):
         return True
 
     status_code = getattr(exc, "status_code", None)
-    if status_code == 429 or (status_code and status_code >= 500):
+    if status_code in (401, 403, 429) or (status_code and status_code >= 500):
         return True
 
     err_msg = str(exc).lower()
+
+    # Quota / rate limit errors
     if any(q in err_msg for q in ("quota", "resource exhausted", "rate limit", "too many requests")):
         return True
+
+    # 400 where message says API key is invalid or expired
+    if status_code == 400 or isinstance(exc, BadRequestError):
+        key_indicators = ("api key", "api_key", "apikey")
+        problem_indicators = ("invalid", "expired", "not valid", "unauthorized", "auth", "permission", "not found")
+        if any(k in err_msg for k in key_indicators) and any(p in err_msg for p in problem_indicators):
+            return True
+        return False
 
     return False
 

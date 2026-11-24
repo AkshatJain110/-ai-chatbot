@@ -309,6 +309,48 @@ async def test_non_retryable_400_does_not_failover(client):
     assert "detail" in res.json()
 
 
+@pytest.mark.asyncio
+async def test_failover_on_401_403_and_invalid_key_400(client):
+    """
+    Treat HTTP 401/403, and 400 with invalid/expired API key as failover-worthy.
+    """
+    from litellm.exceptions import AuthenticationError, PermissionDeniedError, BadRequestError
+
+    mock_success = create_mock_model_response("Success reply", prompt_tokens=10, completion_tokens=10)
+
+    # 1. 401 failover: key_1 raises 401, key_2 succeeds
+    with patch("litellm.acompletion", side_effect=[
+        AuthenticationError("Invalid API key", "gemini", "gemini/gemini-2.0-flash"),
+        mock_success
+    ]):
+        res1 = client.post("/chat", json={"session_id": "auth_sess_1", "message": "hello"})
+    assert res1.status_code == 200
+    assert res1.json()["metadata"]["key_id"] == "key_2"
+    assert res1.json()["metadata"]["fallback_attempts"] == 1
+
+    # 2. 403 failover: key_1 raises 403, key_2 succeeds
+    import httpx
+    dummy_resp = httpx.Response(status_code=403, request=httpx.Request("POST", "https://api.fake.com"))
+    with patch("litellm.acompletion", side_effect=[
+        PermissionDeniedError("Permission denied for API key", "gemini", "gemini/gemini-2.0-flash", response=dummy_resp),
+        mock_success
+    ]):
+        res2 = client.post("/chat", json={"session_id": "auth_sess_2", "message": "hello"})
+    assert res2.status_code == 200
+    assert res2.json()["metadata"]["key_id"] == "key_2"
+    assert res2.json()["metadata"]["fallback_attempts"] == 1
+
+    # 3. 400 with invalid API key in message: key_1 fails, key_2 succeeds
+    with patch("litellm.acompletion", side_effect=[
+        BadRequestError("API_KEY_INVALID: The provided API key is expired or invalid", "gemini/gemini-2.0-flash", "gemini"),
+        mock_success
+    ]):
+        res3 = client.post("/chat", json={"session_id": "auth_sess_3", "message": "hello"})
+    assert res3.status_code == 200
+    assert res3.json()["metadata"]["key_id"] == "key_2"
+    assert res3.json()["metadata"]["fallback_attempts"] == 1
+
+
 def test_global_exception_handler_returns_json_never_stack_trace():
     """
     Global exception handler returns JSON {"detail": ...} on 500, never HTML or stack trace.

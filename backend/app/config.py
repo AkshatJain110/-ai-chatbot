@@ -1,6 +1,13 @@
 import os
 from typing import List, Tuple
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from root directory or working directory
+root_env = Path(__file__).resolve().parent.parent.parent / ".env"
+if root_env.is_file():
+    load_dotenv(dotenv_path=root_env)
+load_dotenv()
 
 def get_env_bool(var_name: str, default: bool = False) -> bool:
     val = os.getenv(var_name)
