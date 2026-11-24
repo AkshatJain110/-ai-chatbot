@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch
 from litellm.types.utils import ModelResponse, Choices, Message, Usage
+from litellm.exceptions import Timeout
 
 
 def create_mock_model_response(content: str = "Mocked LLM reply", prompt_tokens: int = 15, completion_tokens: int = 25):
@@ -365,4 +366,22 @@ def test_global_exception_handler_returns_json_never_stack_trace():
     data = res.json()
     assert "detail" in data
     assert data["detail"] == "Internal server error"
+
+
+@pytest.mark.asyncio
+async def test_failover_on_timeout(client):
+    """
+    Per-key request timeout triggers failover to the next key.
+    """
+    mock_success = create_mock_model_response("Timeout recovered answer")
+    with patch("litellm.acompletion", side_effect=[
+        Timeout("Simulated timeout", "gemini/gemini-3.5-flash", "gemini"),
+        mock_success
+    ]):
+        res = client.post("/chat", json={"session_id": "timeout_sess", "message": "hello timeout"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["reply"] == "Timeout recovered answer"
+    assert data["metadata"]["key_id"] == "key_2"
+    assert data["metadata"]["fallback_attempts"] == 1
 

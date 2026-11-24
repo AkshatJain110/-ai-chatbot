@@ -62,6 +62,13 @@ class Settings:
         return os.getenv("LLM_MODEL", "gemini/gemini-3.5-flash")
 
     @property
+    def llm_timeout_seconds(self) -> int:
+        try:
+            return int(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+        except (ValueError, TypeError):
+            return 60
+
+    @property
     def default_system_prompt(self) -> str:
         return os.getenv("DEFAULT_SYSTEM_PROMPT", "You are a helpful and concise AI assistant.")
 

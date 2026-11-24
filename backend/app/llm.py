@@ -66,12 +66,16 @@ def raise_simulated_exception(status_code: int, model: str) -> None:
         raise PermissionDeniedError(message=msg, llm_provider=provider, model=model, response=dummy_resp)
     elif status_code == 429:
         raise RateLimitError(message=msg, llm_provider=provider, model=model)
+    elif status_code == 408:
+        raise Timeout(message=msg, model=model, llm_provider=provider)
     elif status_code == 500:
         raise InternalServerError(message=msg, llm_provider=provider, model=model)
     elif status_code == 502:
         raise APIConnectionError(message=msg, llm_provider=provider, model=model)
     elif status_code == 503:
         raise ServiceUnavailableError(message=msg, llm_provider=provider, model=model)
+    elif status_code == 504:
+        raise Timeout(message=msg, model=model, llm_provider=provider)
     else:
         # Default 5xx simulation
         raise InternalServerError(message=msg, llm_provider=provider, model=model)
@@ -152,6 +156,7 @@ async def execute_chat_completion(
                 messages=messages,
                 api_key=api_key,
                 caching=(not is_simulated),
+                timeout=settings.llm_timeout_seconds,
             )
 
             # Check if this was a cache hit
