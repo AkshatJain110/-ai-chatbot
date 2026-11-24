@@ -1,196 +1,89 @@
-# Full-Stack AI Chatbot
+# AI Chatbot
 
-A production-ready full-stack AI chatbot with multi-turn conversation memory, automatic API key failover, response caching, and a responsive React frontend.
+A simple full-stack chatbot with multi-turn memory, API key failover, and prompt caching.
 
----
+```
+ai-chatbot/
+├── backend/          # FastAPI app, SQLite database, and pytest suite
+├── frontend/         # React + Vite frontend with plain CSS
+├── docker-compose.yml
+├── Makefile
+└── .env.example
+```
 
 ## 1. Live URLs
-
-- **Frontend Application**: `http://localhost:3000` *(Placeholder / Deployed URL)*
-- **Backend API**: `http://localhost:8000` *(Placeholder / Deployed URL)*
-- **Health Check Endpoint**: `http://localhost:8000/health`
-- **Interactive API Documentation**: `http://localhost:8000/docs`
-
----
+- Frontend: https://frontend-placeholder.example.com
+- Backend: https://backend-placeholder.example.com
+- Demo Video: https://video-placeholder.example.com
 
 ## 2. Run locally: with Docker and without
 
-### Prerequisites
-- Python 3.12+ (or 3.13+)
-- Node.js 18+ and npm
-- Docker and Docker Compose (for containerized execution)
-- At least one Google Gemini API key (two or more recommended to exercise key failover)
+### With Docker
+1. Copy the example environment file and add your Gemini API keys:
+   `cp .env.example .env`
+2. Start the services:
+   `make up`
+3. Open `http://localhost:3000` for the chat UI and `http://localhost:8000/health` for the API.
+4. Stop with `make down`.
 
-### Environment Configuration
-Create a `.env` file in the project root by copying `.env.example`:
-```bash
-cp .env.example .env
-```
-Edit `.env` to supply your Gemini API keys:
-```env
-LLM_API_KEYS=your_first_gemini_key,your_second_gemini_key
-LLM_MODEL=gemini/gemini-3.5-flash-lite
-LLM_TIMEOUT_SECONDS=60
-DEFAULT_SYSTEM_PROMPT=You are a helpful and concise AI assistant.
-ENABLE_FAILURE_SIMULATION=true
-ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-DATABASE_URL=sqlite:///./app.db
-```
-
----
-
-### Option A: Run with Docker Compose (Recommended)
-
-1. **Start all services in background**:
+### Without Docker
+1. Backend:
    ```bash
-   make up
+   cd backend
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt
+   uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
    ```
-   *(Or run `docker compose up --build -d` directly)*
-
-2. **Access the application**:
-   - Frontend: Open `http://localhost:3000` in your browser.
-   - Backend API: `http://localhost:8000` (Health: `http://localhost:8000/health`).
-
-3. **Stop the services**:
+2. Frontend:
    ```bash
-   make down
+   cd frontend
+   npm install
+   npm run dev
    ```
-   *(Or run `docker compose down`)*. Note that conversation history persists across container restarts thanks to the named volume `chatbot_data` mounted at `/data`.
-
----
-
-### Option B: Run without Docker
-
-#### 1. Backend Setup
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-The backend server runs on `http://127.0.0.1:8000`.
-
-To run backend tests:
-```bash
-PYTHONPATH=. pytest -v tests
-```
-
-#### 2. Frontend Setup
-In a new terminal:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-The frontend Vite development server runs on `http://localhost:3000` and communicates with the backend on `http://localhost:8000`.
-
----
 
 ## 3. Design decisions: key fallback, caching, SQLite session storage
 
-### Key Fallback Mechanism
-- **Ordered Key Pool**: Configured keys are parsed from `LLM_API_KEYS` into an ordered sequence `[key_1, key_2, ...]`.
-- **Targeted Failover**: Requests start on `key_1`. If a retryable failure occurs (HTTP 429 quota exhaustion, 5xx server errors, 401/403 authentication/permission errors, request timeouts via `LLM_TIMEOUT_SECONDS`, or 400 with invalid API key), the system seamlessly catches the error, increments `fallback_attempts`, and retries the exact prompt on `key_2`.
-- **Non-retryable Error Guard**: Client-side syntax errors (general 400 Bad Request) are immediately propagated to avoid useless retries.
-- **503 Exhaustion**: If every key in the pool is exhausted, the endpoint returns an HTTP 503 `{"detail": "all providers unavailable"}` without persisting failed messages.
+**Key fallback**: I configured an ordered key pool `[key_1, key_2, ...]` read from `LLM_API_KEYS`. When a call fails due to rate limits (429), timeouts, server errors (5xx), auth errors (401/403), or expired keys, the code catches the error and retries the prompt with the next key in line. If all keys fail, it returns a 503 error.
 
-### Exact Caching
-- **LiteLLM Local Cache**: An in-memory cache (`Cache(type="local")`) caches prompt completions keyed on model and message payload.
-- **Cross-Session Optimization**: When a user in session `B` sends an identical query previously answered in session `A`, it returns `LLM_CACHE` in ~100 ms instead of 10-20 seconds of live inference.
-- **Cache Hit Metadata**: Cache hits report `resolution_source: "LLM_CACHE"`, `key_id: null`, and `fallback_attempts: 0`, while preserving token metrics and response text.
-- **Simulation Bypass**: When failure simulation headers (`X-Simulate-Failure`) are present, caching is completely bypassed (`caching=False`) so simulated faults hit provider logic directly.
+**Caching**: I used LiteLLM's in-memory local cache. The cache key is based on the model and the full message history rather than the session ID, so an identical question asked across different sessions returns instantly from cache. Requests using `X-Simulate-Failure` bypass the cache so faults can be tested directly.
 
-### SQLite Session Storage
-- **Built-in `sqlite3`**: Standard library `sqlite3` with WAL (`Write-Ahead Logging`) mode for fast concurrent reads and writes without heavy ORM overhead.
-- **Atomic Turn Persistence**: Both user and assistant turns are stored within an atomic transaction only after a successful LLM completion. If an LLM call fails, no orphaned user message or session row is written.
-- **System Prompt Statefulness**: An initial `system_prompt` provided on turn 1 is persisted on the session row and automatically prepended to LLM context on all subsequent turns without requiring the client to retransmit it.
-- **Session Isolation**: Messages are strictly scoped by `session_id`. Querying unknown sessions returns HTTP 404 `{"detail": "session not found"}`.
+**SQLite session storage**: I created a `messages` table and a `sessions` table using Python's built-in `sqlite3` in WAL mode. Turns are committed inside a transaction only after the LLM responds successfully, preventing orphaned user messages on failure. When using Docker, the database is mounted to a named volume at `/data` so conversation history persists across container restarts. I set the model via `LLM_MODEL` to `gemini/gemini-3.5-flash-lite` by default because regular flash models generated reasoning tokens that made responses take 10 to 40 seconds.
 
-### Model Selection & Swappability
-- **Swappable via `LLM_MODEL`**: The underlying LLM is fully swappable via the `LLM_MODEL` environment variable (e.g. `gemini/gemini-3.5-flash-lite`, `gemini/gemini-3.5-flash`, etc.) without modifying any application code.
-- **Low-Latency Default (`gemini-3.5-flash-lite`)**: Full `gemini-3.5-flash` features internal reasoning / "thinking" tokens that routinely inflated conversational reply latency to 10–40 seconds. Selecting `gemini/gemini-3.5-flash-lite` as the default offers drastically lower latency for interactive chat while preserving high generation quality.
+## 4. Verification: how to see failover, cache hits and per-message token usage
 
----
+1. Cache hit:
+   Ask a question in one session, then send the exact same message in a new session:
+   ```bash
+   curl -s -X POST http://localhost:8000/chat -H "Content-Type: application/json" -d '{"session_id":"s1","message":"What is the capital of Spain?"}'
+   curl -s -X POST http://localhost:8000/chat -H "Content-Type: application/json" -d '{"session_id":"s2","message":"What is the capital of Spain?"}'
+   ```
+   The second call returns in under 100 ms with `resolution_source: "LLM_CACHE"`.
 
-## 4. Verification: how to see failover, cache hits and per-message token usage (include curl commands with X-Simulate-Failure)
+2. Failover simulation:
+   Simulate a rate limit on the primary key to verify key_2 answers:
+   ```bash
+   curl -s -X POST http://localhost:8000/chat -H "Content-Type: application/json" -H "X-Simulate-Failure: key_1=429" -d '{"session_id":"s3","message":"Hello"}'
+   ```
+   Simulate all keys failing:
+   ```bash
+   curl -s -i -X POST http://localhost:8000/chat -H "Content-Type: application/json" -H "X-Simulate-Failure: *=429" -d '{"session_id":"s4","message":"Hello"}'
+   ```
+   This returns 503. Checking history returns 404 because failed turns are never saved:
+   ```bash
+   curl -s -i http://localhost:8000/sessions/s4/messages
+   ```
 
-### 1. Live Inference vs. Cache Hit
-Send a request to a new session:
-```bash
-curl -s -X POST http://127.0.0.1:8000/chat   -H "Content-Type: application/json"   -d '{"session_id": "demo-cache-1", "message": "What is the capital of France?"}'
-```
-**Output**: `resolution_source: "LIVE_INFERENCE"`, `key_id: "key_1"`, latency ~10-15 seconds.
+3. Token usage:
+   Tokens show directly underneath each assistant reply in the UI (Input tokens and Output tokens) and in the API response metadata. Multi-turn chats show input tokens increasing as conversation history is sent.
 
-Send the **exact same message** in a completely new session:
-```bash
-curl -s -X POST http://127.0.0.1:8000/chat   -H "Content-Type: application/json"   -d '{"session_id": "demo-cache-2", "message": "What is the capital of France?"}'
-```
-**Output**: `resolution_source: "LLM_CACHE"`, `key_id: null`, latency < 100 ms.
+## 5. Setup Used: your editor and AI tools
+I built this on macOS using VS Code as my primary editor. I used Antigravity as my AI pair programmer to assist with design and implementation, Google Gemini (via LiteLLM) for LLM completions, and Docker Desktop for containerization.
 
----
-
-### 2. Provider Failover via `X-Simulate-Failure`
-
-#### Failover from `key_1` to `key_2` on 429 Rate Limit:
-```bash
-curl -s -X POST http://127.0.0.1:8000/chat   -H "Content-Type: application/json"   -H "X-Simulate-Failure: key_1=429"   -d '{"session_id": "demo-failover-1", "message": "Tell me a joke about robots."}'
-```
-**Output**: Status 200, `key_id: "key_2"`, `fallback_attempts: 1`.
-
-#### Failover from `key_1` on 500 Internal Server Error:
-```bash
-curl -s -X POST http://127.0.0.1:8000/chat   -H "Content-Type: application/json"   -H "X-Simulate-Failure: key_1=500"   -d '{"session_id": "demo-failover-2", "message": "What is the speed of light?"}'
-```
-**Output**: Status 200, `key_id: "key_2"`, `fallback_attempts: 1`.
-
-#### All Keys Fail (HTTP 503) + History Not Saved:
-```bash
-curl -s -i -X POST http://127.0.0.1:8000/chat   -H "Content-Type: application/json"   -H "X-Simulate-Failure: *=429"   -d '{"session_id": "demo-exhausted", "message": "This message will fail."}'
-```
-**Output**: `HTTP/1.1 503 Service Unavailable`, `{"detail": "all providers unavailable"}`.
-
-Check history (must return 404 because no history was stored):
-```bash
-curl -s -i http://127.0.0.1:8000/sessions/demo-exhausted/messages
-```
-**Output**: `HTTP/1.1 404 Not Found`, `{"detail": "session not found"}`.
-
----
-
-### 3. Per-Message Token Verification
-Send first turn:
-```bash
-curl -s -X POST http://127.0.0.1:8000/chat   -H "Content-Type: application/json"   -d '{"session_id": "demo-tokens", "message": "My name is Alice."}'
-```
-Observe `input_tokens: ~16`.
-
-Send second turn:
-```bash
-curl -s -X POST http://127.0.0.1:8000/chat   -H "Content-Type: application/json"   -d '{"session_id": "demo-tokens", "message": "What is my name?"}'
-```
-Observe `input_tokens: ~40`. The input tokens include previous context turns, demonstrating conversational memory while reporting per-request metrics rather than cumulative output counters.
-
----
-
-## 5. Setup Used: your editor and AI tools (Antigravity, Gemini)
-
-- **AI Pair Programmer**: Antigravity with Google DeepMind agentic coding architecture.
-- **Foundation LLM**: Google Gemini 3.5 Flash Lite (`gemini/gemini-3.5-flash-lite`) via LiteLLM for inference, conversational reasoning, and testing.
-- **Development Tooling**:
-  - Python 3.12/3.13, FastAPI, Uvicorn, SQLite3 (WAL mode)
-  - Pytest + Pytest-Asyncio for automated test suites
-  - React 18, Vite 5, Plain CSS for responsive, lightweight frontend
-  - Docker & Docker Compose for multi-stage containerization
-  - Make for unified developer ergonomics (`make up`, `make down`)
-
----
-
-## 6. Bonus features
-
-- **Light and Dark Theme**: Built-in CSS variables toggle supporting instant theme switching with seamless contrast in both modes.
-- **Request Timeout Failover**: Configurable `LLM_TIMEOUT_SECONDS` (default 60s) ensures hanging requests fail over to secondary keys without freezing the user interface.
-- **Stateful System Prompts**: Custom assistant persona persists across subsequent turns in the session without needing to resend the prompt.
-- **Real-time Typing Animation**: Non-blocking typing indicator with animated pulses and status feedback during LLM inference.
-- **Graceful Error Banners**: Contextual, readable in-chat error displays for 422 validation errors, 503 provider outages, and network failures.
-- **Zero Heavy Dependencies**: Pure standard library SQLite, LiteLLM, native React state, and pure CSS without bulky ORMs or UI libraries.
+## 6. Bonus features (if any)
+- Light and dark theme toggle remembering preferences in localStorage.
+- Animated typing indicator while waiting for replies.
+- New chat button that generates a fresh random session ID.
+- Configurable per-key timeout (`LLM_TIMEOUT_SECONDS`) triggering automatic failover.
+- Failover handling for 401, 403, and expired-key 400 errors.
+- 14 automated backend tests covering the full API contract.
+- System prompt support is fully implemented in the backend API (turn 1 persists for the session), though omitted from the UI to keep the interface clean.
