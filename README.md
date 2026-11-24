@@ -12,9 +12,8 @@ ai-chatbot/
 ```
 
 ## 1. Live URLs
-- Frontend: https://frontend-placeholder.example.com
-- Backend: https://backend-placeholder.example.com
-- Demo Video: https://video-placeholder.example.com
+- Frontend: https://ai-chatbot-zeta-orcin.vercel.app
+- Backend: https://ai-chatbot-backend-cgfb.onrender.com
 
 ## 2. Run locally: with Docker and without
 
